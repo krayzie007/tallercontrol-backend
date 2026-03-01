@@ -1,32 +1,26 @@
-const router = require('express').Router();
-const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
-const { pool } = require('../db');
 
-// POST /api/auth/login
-router.post('/login', async (req, res) => {
-  const { user, pass } = req.body;
-  if (!user || !pass) return res.status(400).json({ error: 'Usuario y contraseña requeridos' });
+function authMiddleware(req, res, next) {
+  const header = req.headers['authorization'];
+  if (!header) return res.status(401).json({ error: 'Token requerido' });
+
+  const token = header.split(' ')[1];
+  if (!token) return res.status(401).json({ error: 'Token inválido' });
 
   try {
-    const [rows] = await pool.query('SELECT * FROM usuarios WHERE user = ?', [user]);
-    if (rows.length === 0) return res.status(401).json({ error: 'Usuario o contraseña incorrectos' });
-
-    const usuario = rows[0];
-    const valid = await bcrypt.compare(pass, usuario.pass);
-    if (!valid) return res.status(401).json({ error: 'Usuario o contraseña incorrectos' });
-
-    const token = jwt.sign(
-      { id: usuario.id, user: usuario.user, nombre: usuario.nombre, role: usuario.role },
-      process.env.JWT_SECRET,
-      { expiresIn: '8h' }
-    );
-
-    res.json({ token, user: { id: usuario.id, nombre: usuario.nombre, user: usuario.user, role: usuario.role } });
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    req.user = decoded;
+    next();
   } catch (e) {
-    console.error(e);
-    res.status(500).json({ error: 'Error del servidor' });
+    return res.status(401).json({ error: 'Token expirado o inválido' });
   }
-});
+}
 
-module.exports = router;
+function adminOnly(req, res, next) {
+  if (req.user.role !== 'admin') {
+    return res.status(403).json({ error: 'Solo administradores' });
+  }
+  next();
+}
+
+module.exports = { authMiddleware, adminOnly };
